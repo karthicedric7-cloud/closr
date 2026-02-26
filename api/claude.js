@@ -6,21 +6,23 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   try {
     const { messages, system } = req.body;
-    const contents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: system }] },
-        contents,
-      }),
-    });
+    const contents = [
+      { role: 'user', parts: [{ text: system + '\n\n' + messages[0].content }] },
+      ...messages.slice(1).map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }))
+    ];
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents }),
+      }
+    );
     const data = await response.json();
-    if (!data.candidates) return res.status(500).json({ debug: data, url: url.slice(0, 80) });
+    if (!data.candidates) return res.status(500).json({ debug: data });
     const text = data.candidates[0].content.parts[0].text || '';
     res.status(200).json({ content: [{ text }] });
   } catch (e) {
