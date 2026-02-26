@@ -1,22 +1,6 @@
 // @ts-nocheck
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-const GOOGLE_CLIENT_ID = '465534058429-asiprc469vca1kccb77bv8nst0okd0uo.apps.googleusercontent.com';
-const GOOGLE_SCOPES = 'openid email profile https://www.googleapis.com/auth/gmail.send';
-
-function loadGSI() {
-  return new Promise((resolve) => {
-    if (window.google?.accounts?.oauth2) return resolve();
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.onload = () => {
-      const iv = setInterval(() => {
-        if (window.google?.accounts?.oauth2) { clearInterval(iv); resolve(); }
-      }, 100);
-    };
-    document.head.appendChild(s);
-  });
-}
 
 
 
@@ -72,26 +56,11 @@ export default function App() {
   const [error, setError]     = useState(null);
 
 
-  // ── Sign in with Google ──────────────────────────────────────────────────
-  async function signIn() {
-    try {
-      await loadGSI();
-      window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: GOOGLE_SCOPES,
-        callback: async (resp) => {
-          if (resp.error) { alert('Sign-in failed: ' + resp.error); return; }
-          const profile = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${resp.access_token}` },
-          }).then(r => r.json());
-          setUser({ name: profile.name, email: profile.email, picture: profile.picture, accessToken: resp.access_token });
-          setView('app');
-          setAppPage('dashboard');
-        },
-      }).requestAccessToken();
-    } catch (e) {
-      alert('Sign-in failed. Please try again.');
-    }
+  // ── Sign in (mock for artifact — real OAuth on deploy) ───────────────────
+  function signIn() {
+    setUser({ name: 'Your Account', email: 'you@gmail.com', picture: null, accessToken: null });
+    setView('app');
+    setAppPage('dashboard');
   }
 
   function signOut() { setUser(null); setView('landing'); setEmails([]); setSent({}); }
