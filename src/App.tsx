@@ -1,6 +1,22 @@
 // @ts-nocheck
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
+const GOOGLE_CLIENT_ID = '465534058429-asiprc469vca1kccb77bv8nst0okd0uo.apps.googleusercontent.com';
+const GOOGLE_SCOPES = 'openid email profile https://www.googleapis.com/auth/gmail.send';
+
+function loadGSI() {
+  return new Promise((resolve) => {
+    if (window.google?.accounts?.oauth2) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = () => {
+      const iv = setInterval(() => {
+        if (window.google?.accounts?.oauth2) { clearInterval(iv); resolve(); }
+      }, 100);
+    };
+    document.head.appendChild(s);
+  });
+}
 
 
 
@@ -19,7 +35,7 @@ async function sendGmail(accessToken, toEmail, subject, body) {
 async function callClaude(messages, systemPrompt) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: systemPrompt, messages }),
   });
   const data = await response.json();
