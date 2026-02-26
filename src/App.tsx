@@ -19,7 +19,7 @@ async function sendGmail(accessToken, toEmail, subject, body) {
 async function callClaude(messages, systemPrompt) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: systemPrompt, messages }),
   });
   const data = await response.json();
@@ -56,11 +56,26 @@ export default function App() {
   const [error, setError]     = useState(null);
 
 
-  // ── Sign in (mock for artifact — real OAuth on deploy) ───────────────────
-  function signIn() {
-    setUser({ name: 'Your Account', email: 'you@gmail.com', picture: null, accessToken: null });
-    setView('app');
-    setAppPage('dashboard');
+  // ── Sign in with Google ──────────────────────────────────────────────────
+  async function signIn() {
+    try {
+      await loadGSI();
+      window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: GOOGLE_SCOPES,
+        callback: async (resp) => {
+          if (resp.error) { alert('Sign-in failed: ' + resp.error); return; }
+          const profile = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${resp.access_token}` },
+          }).then(r => r.json());
+          setUser({ name: profile.name, email: profile.email, picture: profile.picture, accessToken: resp.access_token });
+          setView('app');
+          setAppPage('dashboard');
+        },
+      }).requestAccessToken();
+    } catch (e) {
+      alert('Sign-in failed. Please try again.');
+    }
   }
 
   function signOut() { setUser(null); setView('landing'); setEmails([]); setSent({}); }
