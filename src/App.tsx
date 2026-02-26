@@ -1,22 +1,6 @@
 // @ts-nocheck
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-const GOOGLE_CLIENT_ID = '465534058429-asiprc469vca1kccb77bv8nst0okd0uo.apps.googleusercontent.com';
-const GOOGLE_SCOPES = 'openid email profile https://www.googleapis.com/auth/gmail.send';
-
-function loadGSI() {
-  return new Promise((resolve) => {
-    if (window.google?.accounts?.oauth2) return resolve();
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.onload = () => {
-      const iv = setInterval(() => {
-        if (window.google?.accounts?.oauth2) { clearInterval(iv); resolve(); }
-      }, 100);
-    };
-    document.head.appendChild(s);
-  });
-}
 
 
 
@@ -33,13 +17,13 @@ async function sendGmail(accessToken, toEmail, subject, body) {
 
 // ─── Claude API ───────────────────────────────────────────────────────────────
 async function callClaude(messages, systemPrompt) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1000, system: systemPrompt, messages }),
   });
   const data = await response.json();
-  if (!data.content) throw new Error('API error');
+  if (!data.content) throw new Error(JSON.stringify(data));
   return data.content.map(b => b.text || '').join('').replace(/```json\n?|```/g, '').trim();
 }
 
@@ -72,26 +56,37 @@ export default function App() {
   const [error, setError]     = useState(null);
 
 
-  // ── Sign in with Google ──────────────────────────────────────────────────
-  async function signIn() {
-    try {
-      await loadGSI();
-      window.google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: GOOGLE_SCOPES,
-        callback: async (resp) => {
-          if (resp.error) { alert('Sign-in failed: ' + resp.error); return; }
+  // ── Sign in with Google (popup flow) ────────────────────────────────────
+  function signIn() {
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: 'https://closr-pdop.vercel.app',
+      response_type: 'token',
+      scope: GOOGLE_SCOPES,
+      prompt: 'select_account',
+    });
+    const url = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    const popup = window.open(url, 'google-auth', 'width=500,height=600,left=200,top=100');
+    if (!popup) { alert('Please allow popups for this site'); return; }
+    const timer = setInterval(async () => {
+      try {
+        if (popup.closed) { clearInterval(timer); return; }
+        const hash = new URLSearchParams(popup.location.hash.slice(1));
+        const token = hash.get('access_token');
+        if (token) {
+          clearInterval(timer);
+          popup.close();
           const profile = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${resp.access_token}` },
+            headers: { Authorization: `Bearer ${token}` },
           }).then(r => r.json());
-          setUser({ name: profile.name, email: profile.email, picture: profile.picture, accessToken: resp.access_token });
+          setUser({ name: profile.name, email: profile.email, picture: profile.picture, accessToken: token });
           setView('app');
           setAppPage('dashboard');
-        },
-      }).requestAccessToken();
-    } catch (e) {
-      alert('Sign-in failed. Please try again.');
-    }
+        }
+      } catch (e) {
+        if (popup.closed) clearInterval(timer);
+      }
+    }, 500);
   }
 
   function signOut() { setUser(null); setView('landing'); setEmails([]); setSent({}); }
