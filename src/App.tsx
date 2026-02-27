@@ -23,7 +23,10 @@ async function callClaude(messages, systemPrompt) {
   });
   const data = await response.json();
   if (!data.content) throw new Error(JSON.stringify(data));
-  return data.content.map(b => b.text || '').join('').replace(/```json\n?|```/g, '').trim();
+  const raw = data.content.map(b => b.text || '').join('').replace(/```json\n?|```/g, '').trim();
+  // Fix newlines inside JSON strings
+  const fixed = raw.replace(/\n/g, '\\n').replace(/\r/g, '');
+  try { JSON.parse(fixed); return fixed; } catch(e) { return raw; }
 }
 
 const stageConfig = {
