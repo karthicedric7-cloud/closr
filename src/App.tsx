@@ -49,8 +49,11 @@ export default function App() {
   const [stage, setStage]     = useState(0);
   const [copied, setCopied]   = useState(null);
   const [sent, setSent]       = useState({});
-  const [sending, setSending] = useState(null);
   const [error, setError]     = useState(null);
+  const [leads, setLeads]       = useState([]); // [{ name, email, company }]
+  const [sendingAll, setSendingAll] = useState(false);
+  const [sentLeads, setSentLeads] = useState({});
+  const [sentPhase, setSentPhase] = useState(0); // 0=none, 1=cold sent, 2=fu1 sent, 3=fu2 sent
 
   function signIn() {
     const params = new URLSearchParams({
@@ -84,7 +87,77 @@ export default function App() {
     }, 500);
   }
 
-  function signOut() { setUser(null); setView('landing'); setEmails([]); setSent({}); }
+  function signOut() { setUser(null); setView('landing'); setEmails([]); setSent({}); setLeads([]); setSentLeads({}); setSentPhase(0); }
+
+  function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
+    return lines.slice(1).map(line => {
+      const vals = line.split(',').map(v => v.trim().replace(/"/g, ''));
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = vals[i] || ''; });
+      return {
+        name: obj.name || obj['first name'] || obj.firstname || '',
+        email: obj.email || obj['email address'] || '',
+        company: obj.company || obj.organization || obj.account || '',
+      };
+    }).filter(l => l.email.includes('@'));
+  }
+
+  function handleCSVUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const parsed = parseCSV(ev.target.result);
+      setLeads(parsed);
+      setSentLeads({});
+    };
+    reader.readAsText(file);
+  }
+
+  function personalize(text, lead) {
+    let t = text;
+    if (lead.name) {
+      t = t.replace(/\[First Name\]|\[Name\]|\[Founder'?s? Name\]/gi, lead.name);
+      t = t.replace(/^Hey,/m, 'Hey ' + lead.name + ',');
+      t = t.replace(/^Hi,/m, 'Hi ' + lead.name + ',');
+    }
+    if (lead.company) {
+      t = t.replace(/\[Company\]|\[company name\]|\[Organization\]/gi, lead.company);
+    }
+    return t;
+  }
+
+  async function handleSendPhase(phaseIdx) {
+    if (!user?.accessToken || !emails.length || !leads.length) return;
+    const email = emails[phaseIdx];
+    if (!email) return;
+    setSendingAll(true);
+    const results = { ...sentLeads };
+    for (let i = 0; i < leads.length; i++) {
+      const lead = leads[i];
+      try {
+        await sendGmail(
+          user.accessToken,
+          lead.email,
+          personalize(email.subject, lead),
+          personalize(email.body, lead)
+        );
+        results[`${phaseIdx}-${i}`] = 'sent';
+        await new Promise(r => setTimeout(r, 500));
+      } catch (e) {
+        results[`${phaseIdx}-${i}`] = 'error';
+      }
+      setSentLeads({ ...results });
+    }
+    setSentPhase(phaseIdx + 1);
+    setSendingAll(false);
+  }
+
+  async function handleSendAll() {
+    await handleSendPhase(0);
+  }
 
   const sp = () => `You are writing cold outbound emails for B2B founders.
 Your goal is to start a simple, natural conversation that gets a reply.
@@ -121,13 +194,7 @@ NEVER use dashes. Return ONLY raw JSON: {"subject":"...","body":"..."}`;
   }
 
   async function handleSendGmail(email, idx) {
-    if (!user?.accessToken) return;
-    setSending(idx);
-    try {
-      await sendGmail(user.accessToken, user.email, email.subject, email.body);
-      setSent(prev => ({ ...prev, [idx]: true }));
-    } catch (e) { alert('Failed to send: ' + e.message); }
-    setSending(null);
+    // kept for compatibility but sending is now done via handleSendAll
   }
 
   function copy(body, idx) {
@@ -208,7 +275,7 @@ NEVER use dashes. Return ONLY raw JSON: {"subject":"...","body":"..."}`;
         </header>
         <main style={{ flex: 1, overflow: 'auto', padding: 32 }}>
           {appPage === 'dashboard' && <Dashboard onLaunch={() => setAppPage('campaign')} />}
-          {appPage === 'campaign'  && <Campaign offer={offer} setOffer={setOffer} icp={icp} setIcp={setIcp} emails={emails} loading={loading} stage={stage} error={error} copied={copied} sent={sent} sending={sending} user={user} onSignIn={signIn} onRun={runOutreach} onCopy={copy} onSendGmail={handleSendGmail} />}
+          {appPage === 'campaign'  && <Campaign offer={offer} setOffer={setOffer} icp={icp} setIcp={setIcp} emails={emails} loading={loading} stage={stage} error={error} copied={copied} sent={sent} sending={null} user={user} onSignIn={signIn} onRun={runOutreach} onCopy={copy} onSendGmail={handleSendGmail} leads={leads} onCSVUpload={handleCSVUpload} onSendAll={handleSendAll} sendingAll={sendingAll} sentLeads={sentLeads} sentPhase={sentPhase} onSendPhase={handleSendPhase} />}
           {appPage === 'sequences' && <Placeholder icon="◆" title="Active Sequences" desc="Your running outreach sequences will appear here." />}
           {appPage === 'leads'     && <Placeholder icon="◎" title="Your Leads"       desc="Everyone we're reaching out to on your behalf lives here." />}
         </main>
@@ -298,7 +365,7 @@ function Dashboard({ onLaunch }) {
   );
 }
 
-function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error, copied, sent, sending, user, onSignIn, onRun, onCopy, onSendGmail }) {
+function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error, copied, sent, sending, user, onSignIn, onRun, onCopy, onSendGmail, leads, onCSVUpload, onSendAll, sendingAll, sentLeads, sentPhase, onSendPhase }) {
   const stageList = ['initial', 'followup1', 'followup2'];
   const canRun = offer.trim() && icp.trim() && !loading;
   return (
@@ -364,15 +431,7 @@ function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error,
                 <button onClick={() => onCopy(email.body, idx)} style={{ fontSize: 11, fontWeight: 500, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>
                   {copied === idx ? '✓ Copied' : 'Copy'}
                 </button>
-                {user ? (
-                  <button onClick={() => onSendGmail(email, idx)} disabled={sending === idx || sent[idx]} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, borderRadius: 6, padding: '5px 12px', cursor: sent[idx] ? 'default' : 'pointer', fontFamily: 'inherit', border: 'none', background: sent[idx] ? '#d1fae5' : 'linear-gradient(135deg,#7c3aed,#a855f7)', color: sent[idx] ? '#059669' : '#fff', opacity: sending === idx ? 0.65 : 1, transition: 'all .2s' }}>
-                    {sent[idx] ? '✓ Sent' : sending === idx ? 'Sending…' : <><GoogleIcon size={11} /> Send via Gmail</>}
-                  </button>
-                ) : (
-                  <button onClick={onSignIn} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 500, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>
-                    <GoogleIcon size={11} /> Connect to send
-                  </button>
-                )}
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>Upload CSV below to send</span>
               </div>
             </div>
             {email.subject && <div style={{ padding: '10px 20px 4px', fontSize: 12, color: '#9ca3af' }}>Subject: <span style={{ color: '#374151', fontWeight: 500 }}>{email.subject}</span></div>}
@@ -383,9 +442,95 @@ function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error,
 
       {loading && (
         <div style={{ background: '#f9fafb', border: '1px dashed #e5e7eb', borderRadius: 12, padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-          {stage === 0 && '→ Sending first touch…'}
-          {stage === 1 && '→ Preparing follow-up #1…'}
-          {stage === 2 && '→ Queuing final follow-up…'}
+          {stage === 0 && '→ Writing cold email…'}
+          {stage === 1 && '→ Writing follow-up #1…'}
+          {stage === 2 && '→ Writing follow-up #2…'}
+        </div>
+      )}
+
+      {emails.length > 0 && !loading && (
+        <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f3f4f6', padding: 24, marginTop: 16 }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 4 }}>📎 Upload your leads CSV</p>
+          <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>CSV should have columns: <strong>name, email, company</strong></p>
+
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 8, border: '2px dashed #e5e7eb', background: '#fafafa', cursor: 'pointer', fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 16 }}>
+            📂 Choose CSV file
+            <input type="file" accept=".csv" onChange={onCSVUpload} style={{ display: 'none' }} />
+          </label>
+
+          {leads.length > 0 && (
+            <div>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <p style={{ fontSize: 13, color: '#15803d', fontWeight: 500 }}>✓ {leads.length} leads loaded</p>
+                <p style={{ fontSize: 12, color: '#6b7280' }}>{Object.values(sentLeads || {}).filter(s => s === 'sent').length} sent</p>
+              </div>
+
+              <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid #f3f4f6', borderRadius: 8, marginBottom: 16 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ background: '#f9fafb' }}>
+                      {['Name', 'Email', 'Company', 'Status'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leads.map((lead, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px 12px', fontSize: 13, color: '#374151' }}>{lead.name || '—'}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 13, color: '#374151' }}>{lead.email}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 13, color: '#374151' }}>{lead.company || '—'}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 12 }}>
+                          {sentLeads?.[i] === 'sent' ? <span style={{ color: '#059669', fontWeight: 600 }}>✓ Sent</span>
+                          : sentLeads?.[i] === 'error' ? <span style={{ color: '#dc2626' }}>✗ Failed</span>
+                          : <span style={{ color: '#9ca3af' }}>Pending</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {user ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { idx: 0, label: 'Cold Email',   icon: '✦', color: '#7c3aed' },
+                    { idx: 1, label: 'Follow-up #1', icon: '◆', color: '#a855f7' },
+                    { idx: 2, label: 'Follow-up #2', icon: '◎', color: '#ec4899' },
+                  ].map(({ idx, label, icon, color }) => {
+                    const phaseSent = sentPhase > idx;
+                    const isNext = sentPhase === idx;
+                    const countSent = Object.keys(sentLeads || {}).filter(k => k.startsWith(idx + '-') && sentLeads[k] === 'sent').length;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => onSendPhase(idx)}
+                        disabled={sendingAll || phaseSent || !isNext}
+                        style={{
+                          width: '100%', padding: '13px 20px', borderRadius: 10, border: 'none',
+                          background: phaseSent ? '#f0fdf4' : isNext ? `linear-gradient(135deg,${color},${color}cc)` : '#f9fafb',
+                          color: phaseSent ? '#059669' : isNext ? '#fff' : '#9ca3af',
+                          fontSize: 14, fontWeight: 700,
+                          cursor: (!sendingAll && isNext) ? 'pointer' : 'not-allowed',
+                          opacity: sendingAll && isNext ? 0.7 : 1,
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          transition: 'all .2s',
+                        }}
+                      >
+                        <span>{icon} {phaseSent ? `✓ ${label} sent to ${countSent} leads` : isNext ? `Send ${label} to all ${leads.length} leads` : `${label} — send cold email first`}</span>
+                        {sendingAll && isNext && <span style={{ fontSize: 12, opacity: 0.8 }}>Sending {countSent + 1} of {leads.length}…</span>}
+                        {!phaseSent && isNext && !sendingAll && <span style={{ fontSize: 18 }}>→</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <button onClick={onSignIn} style={{ width: '100%', padding: '14px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <GoogleIcon size={15} /> Connect Gmail to send
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
