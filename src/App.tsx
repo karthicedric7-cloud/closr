@@ -53,7 +53,8 @@ export default function App() {
   const [leads, setLeads]       = useState([]); // [{ name, email, company }]
   const [sendingAll, setSendingAll] = useState(false);
   const [sentLeads, setSentLeads] = useState({});
-  const [sentPhase, setSentPhase] = useState(0); // 0=none, 1=cold sent, 2=fu1 sent, 3=fu2 sent
+  const [sentPhase, setSentPhase] = useState(0);
+  const [editingIdx, setEditingIdx] = useState(null); // 0=none, 1=cold sent, 2=fu1 sent, 3=fu2 sent
 
   function signIn() {
     const params = new URLSearchParams({
@@ -275,7 +276,7 @@ NEVER use dashes. Return ONLY raw JSON: {"subject":"...","body":"..."}`;
         </header>
         <main style={{ flex: 1, overflow: 'auto', padding: 32 }}>
           {appPage === 'dashboard' && <Dashboard onLaunch={() => setAppPage('campaign')} />}
-          {appPage === 'campaign'  && <Campaign offer={offer} setOffer={setOffer} icp={icp} setIcp={setIcp} emails={emails} loading={loading} stage={stage} error={error} copied={copied} sent={sent} sending={null} user={user} onSignIn={signIn} onRun={runOutreach} onCopy={copy} onSendGmail={handleSendGmail} leads={leads} onCSVUpload={handleCSVUpload} onSendAll={handleSendAll} sendingAll={sendingAll} sentLeads={sentLeads} sentPhase={sentPhase} onSendPhase={handleSendPhase} />}
+          {appPage === 'campaign'  && <Campaign offer={offer} setOffer={setOffer} icp={icp} setIcp={setIcp} emails={emails} loading={loading} stage={stage} error={error} copied={copied} sent={sent} sending={null} user={user} onSignIn={signIn} onRun={runOutreach} onCopy={copy} onSendGmail={handleSendGmail} leads={leads} onCSVUpload={handleCSVUpload} onSendAll={handleSendAll} sendingAll={sendingAll} sentLeads={sentLeads} sentPhase={sentPhase} onSendPhase={handleSendPhase} editingIdx={editingIdx} setEditingIdx={setEditingIdx} onEditEmail={(idx, field, val) => { const updated = [...emails]; updated[idx] = { ...updated[idx], [field]: val }; setEmails(updated); }} />}
           {appPage === 'sequences' && <Placeholder icon="◆" title="Active Sequences" desc="Your running outreach sequences will appear here." />}
           {appPage === 'leads'     && <Placeholder icon="◎" title="Your Leads"       desc="Everyone we're reaching out to on your behalf lives here." />}
         </main>
@@ -365,7 +366,7 @@ function Dashboard({ onLaunch }) {
   );
 }
 
-function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error, copied, sent, sending, user, onSignIn, onRun, onCopy, onSendGmail, leads, onCSVUpload, onSendAll, sendingAll, sentLeads, sentPhase, onSendPhase }) {
+function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error, copied, sent, sending, user, onSignIn, onRun, onCopy, onSendGmail, leads, onCSVUpload, onSendAll, sendingAll, sentLeads, sentPhase, onSendPhase, editingIdx, setEditingIdx, onEditEmail }) {
   const stageList = ['initial', 'followup1', 'followup2'];
   const canRun = offer.trim() && icp.trim() && !loading;
   return (
@@ -428,14 +429,39 @@ function Campaign({ offer, setOffer, icp, setIcp, emails, loading, stage, error,
             <div style={{ padding: '14px 20px', borderBottom: '1px solid #f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: cfg.color, background: cfg.bg, padding: '4px 10px', borderRadius: 20 }}>{cfg.label}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button onClick={() => setEditingIdx(editingIdx === idx ? null : idx)} style={{ fontSize: 11, fontWeight: 500, color: editingIdx === idx ? '#7c3aed' : '#6b7280', background: editingIdx === idx ? '#f5f3ff' : '#f9fafb', border: `1px solid ${editingIdx === idx ? '#7c3aed' : '#e5e7eb'}`, borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {editingIdx === idx ? '✓ Done' : '✏ Edit'}
+                </button>
                 <button onClick={() => onCopy(email.body, idx)} style={{ fontSize: 11, fontWeight: 500, color: '#6b7280', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontFamily: 'inherit' }}>
                   {copied === idx ? '✓ Copied' : 'Copy'}
                 </button>
                 <span style={{ fontSize: 11, color: '#9ca3af' }}>Upload CSV below to send</span>
               </div>
             </div>
-            {email.subject && <div style={{ padding: '10px 20px 4px', fontSize: 12, color: '#9ca3af' }}>Subject: <span style={{ color: '#374151', fontWeight: 500 }}>{email.subject}</span></div>}
-            <div style={{ padding: '8px 20px 18px', fontSize: 14, lineHeight: 1.8, color: '#374151', whiteSpace: 'pre-wrap' }}>{email.body}</div>
+            {email.subject && (
+              editingIdx === idx ? (
+                <div style={{ padding: '10px 20px 4px' }}>
+                  <span style={{ fontSize: 11, color: '#9ca3af' }}>Subject:</span>
+                  <input
+                    value={email.subject}
+                    onChange={e => onEditEmail(idx, 'subject', e.target.value)}
+                    style={{ width: '100%', marginTop: 4, border: '1px solid #7c3aed', borderRadius: 6, padding: '6px 10px', fontSize: 13, fontFamily: 'inherit', outline: 'none', color: '#374151' }}
+                  />
+                </div>
+              ) : (
+                <div style={{ padding: '10px 20px 4px', fontSize: 12, color: '#9ca3af' }}>Subject: <span style={{ color: '#374151', fontWeight: 500 }}>{email.subject}</span></div>
+              )
+            )}
+            {editingIdx === idx ? (
+              <textarea
+                value={email.body}
+                onChange={e => onEditEmail(idx, 'body', e.target.value)}
+                rows={6}
+                style={{ width: '100%', padding: '10px 20px', fontSize: 14, lineHeight: 1.8, color: '#374151', border: 'none', borderTop: '1px solid #f3f4f6', resize: 'vertical', fontFamily: 'inherit', outline: 'none' }}
+              />
+            ) : (
+              <div style={{ padding: '8px 20px 18px', fontSize: 14, lineHeight: 1.8, color: '#374151', whiteSpace: 'pre-wrap', cursor: 'text' }} onClick={() => setEditingIdx(idx)}>{email.body}</div>
+            )}
           </div>
         );
       })}
